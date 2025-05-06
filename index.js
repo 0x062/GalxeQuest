@@ -1,16 +1,19 @@
 // index.js
-import 'dotenv/config'; // load .env ke process.env
+import 'dotenv/config';  // load .env ke process.env
 
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-const ENDPOINT     = 'https://graphigo.prd.galaxy.eco/query';
+const ENDPOINT     = 'https://quest-api.galxe.com/graphql';
 
 if (!ACCESS_TOKEN) {
   throw new Error('🚨 Missing ACCESS_TOKEN in .env');
 }
 
-// Query GraphQL untuk trending quests
+/**
+ * GraphQL query untuk trending quests.
+ * Sesuai dokumentasi: https://docs.galxe.com/quest/graphql-api/overview/endpoint-and-queries
+ */
 const QUERY = `
-  query TrendingQuests($first: Int!, $after: String, $orderBy: QuestOrderBy!) {
+  query GetTrendingQuests($first: Int!, $after: String, $orderBy: QuestOrderBy!) {
     quests(first: $first, after: $after, orderBy: $orderBy) {
       edges {
         node {
@@ -19,66 +22,77 @@ const QUERY = `
           description
           startTime
           endTime
-          space { id name }
+          space {
+            id
+            name
+          }
         }
       }
-      pageInfo { hasNextPage endCursor }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
     }
   }
 `;
 
 /**
- * Fetch trending quests dengan error handling detail
+ * Fetch trending quests dengan pagination.
+ *
  * @param {number} first  — jumlah item per page
  * @param {string|null} after — cursor untuk pagination
  * @returns {Promise<{ edges: Array, pageInfo: Object }>}
  */
 async function fetchTrendingQuests(first = 20, after = null) {
-  const variables = { first, after, orderBy: "TRENDING" };
+  const variables = {
+    first,
+    after,
+    orderBy: "TRENDING"   // enum QuestOrderBy: TRENDING
+  };
+
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
-      'Content-Type':  'application/json',
-      'access-token':  ACCESS_TOKEN,
+      'Content-Type': 'application/json',
+      'access-token': ACCESS_TOKEN
     },
-    body: JSON.stringify({ query: QUERY, variables }),
+    body: JSON.stringify({ query: QUERY, variables })
   });
 
-  // Baca response sebagai text dulu
-  const text = await res.text();
-  let body;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    throw new Error(`🚨 HTTP ${res.status} – Response not JSON:\n${text}`);
-  }
-
-  // Jika status bukan OK, tampilkan error GraphQL
+  // Kalau gagal HTTP
   if (!res.ok) {
-    const errors = body.errors
-      ? body.errors.map(e => e.message || JSON.stringify(e)).join('\n')
-      : JSON.stringify(body);
-    throw new Error(`🚨 HTTP ${res.status} – GraphQL error:\n${errors}`);
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status} – ${text || res.statusText}`);
   }
 
-  return body.data.quests;
+  const { data, errors } = await res.json();
+  if (errors) {
+    // Gabungkan pesan error jika ada
+    const msgs = errors.map(e => e.message).join('\n');
+    throw new Error(`GraphQL errors:\n${msgs}`);
+  }
+
+  return data.quests;
 }
 
 (async () => {
   try {
-    let { edges, pageInfo } = await fetchTrendingQuests();
-    edges.forEach(({ node }) =>
-      console.log(`• ${node.title} [${node.id}] (${node.space.name})`)
-    );
+    // Ambil halaman pertama
+    let { edges, pageInfo } = await fetchTrendingQuests(20, null);
 
-    // Ambil halaman selanjutnya jika ada
+    // Cetak hasil page pertama
+    edges.forEach(({ node }) => {
+      console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`);
+    });
+
+    // Loop pagination
     while (pageInfo.hasNextPage) {
       ({ edges, pageInfo } = await fetchTrendingQuests(20, pageInfo.endCursor));
-      edges.forEach(({ node }) =>
-        console.log(`• ${node.title} [${node.id}] (${node.space.name})`)
-      );
+      edges.forEach(({ node }) => {
+        console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`);
+      });
     }
   } catch (err) {
-    console.error(err.message);
+    console.error(err);
   }
 })();
