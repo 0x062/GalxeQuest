@@ -1,14 +1,14 @@
 // index.js
-import 'dotenv/config';    // load .env
-// built-in fetch di Node 18+
+import 'dotenv/config'; // load .env ke process.env
 
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-const ENDPOINT = 'https://graphigo.prd.galaxy.eco/query';
+const ENDPOINT     = 'https://graphigo.prd.galaxy.eco/query';
 
 if (!ACCESS_TOKEN) {
-  throw new Error('Missing ACCESS_TOKEN in .env');
+  throw new Error('🚨 Missing ACCESS_TOKEN in .env');
 }
 
+// Query GraphQL untuk trending quests
 const QUERY = `
   query TrendingQuests($first: Int!, $after: String, $orderBy: QuestOrderBy!) {
     quests(first: $first, after: $after, orderBy: $orderBy) {
@@ -27,29 +27,41 @@ const QUERY = `
   }
 `;
 
+/**
+ * Fetch trending quests dengan error handling detail
+ * @param {number} first  — jumlah item per page
+ * @param {string|null} after — cursor untuk pagination
+ * @returns {Promise<{ edges: Array, pageInfo: Object }>}
+ */
 async function fetchTrendingQuests(first = 20, after = null) {
   const variables = { first, after, orderBy: "TRENDING" };
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'access-token': ACCESS_TOKEN,
+      'Content-Type':  'application/json',
+      'access-token':  ACCESS_TOKEN,
     },
     body: JSON.stringify({ query: QUERY, variables }),
   });
 
-  if (res.status === 404) {
-    throw new Error(`Endpoint not found (404). Cek URL: ${ENDPOINT}`);
+  // Baca response sebagai text dulu
+  const text = await res.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(`🚨 HTTP ${res.status} – Response not JSON:\n${text}`);
   }
+
+  // Jika status bukan OK, tampilkan error GraphQL
   if (!res.ok) {
-    throw new Error(`HTTP error: ${res.status}`);
+    const errors = body.errors
+      ? body.errors.map(e => e.message || JSON.stringify(e)).join('\n')
+      : JSON.stringify(body);
+    throw new Error(`🚨 HTTP ${res.status} – GraphQL error:\n${errors}`);
   }
-  const { data, errors } = await res.json();
-  if (errors) {
-    console.error('GraphQL errors:', errors);
-    throw new Error('Failed fetching quests');
-  }
-  return data.quests;
+
+  return body.data.quests;
 }
 
 (async () => {
@@ -59,6 +71,7 @@ async function fetchTrendingQuests(first = 20, after = null) {
       console.log(`• ${node.title} [${node.id}] (${node.space.name})`)
     );
 
+    // Ambil halaman selanjutnya jika ada
     while (pageInfo.hasNextPage) {
       ({ edges, pageInfo } = await fetchTrendingQuests(20, pageInfo.endCursor));
       edges.forEach(({ node }) =>
