@@ -1,5 +1,5 @@
 // index.js
-import 'dotenv/config';
+import 'dotenv/config'; // load .env
 
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 const ENDPOINT     = 'https://graphigo.prd.galaxy.eco/query';
@@ -8,39 +8,31 @@ if (!ACCESS_TOKEN) {
   throw new Error('🚨 Missing ACCESS_TOKEN in .env');
 }
 
-// Query GraphQL untuk trending boosts (alias trending quests)
+// Query sederhana: ambil semua boosts (alias trending quests)
 const QUERY = `
-  query GetTrendingBoosts($first: Int!, $after: String, $sortBy: BoostOrderBy!) {
-    boosts(first: $first, after: $after, sortBy: $sortBy) {
-      edges {
-        node {
-          id
-          title
-          description
-          startTime
-          endTime
-          space { id name }
-        }
+  query GetAllBoosts {
+    boosts {
+      id
+      title
+      description
+      startTime
+      endTime
+      space {
+        id
+        name
       }
-      pageInfo { hasNextPage endCursor }
     }
   }
 `;
 
-async function fetchTrendingBoosts(first = 20, after = null) {
-  const variables = {
-    first,
-    after,
-    sortBy: "TRENDING"   // enum BoostOrderBy
-  };
-
+async function fetchAllBoosts() {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'access-token': ACCESS_TOKEN
+      'Content-Type':  'application/json',
+      'access-token':  ACCESS_TOKEN
     },
-    body: JSON.stringify({ query: QUERY, variables })
+    body: JSON.stringify({ query: QUERY })
   });
 
   const text = await res.text();
@@ -54,23 +46,19 @@ async function fetchTrendingBoosts(first = 20, after = null) {
     throw new Error(`GraphQL errors:\n${msgs}`);
   }
 
-  return data.boosts;
+  return data.boosts;  // asumsikan array Boost
 }
 
 (async () => {
   try {
-    let { edges, pageInfo } = await fetchTrendingBoosts(20, null);
-
-    edges.forEach(({ node }) =>
-      console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`)
-    );
-
-    while (pageInfo.hasNextPage) {
-      ({ edges, pageInfo } = await fetchTrendingBoosts(20, pageInfo.endCursor));
-      edges.forEach(({ node }) =>
-        console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`)
-      );
-    }
+    const boosts = await fetchAllBoosts();
+    console.log(`Found ${boosts.length} trending quests:\n`);
+    boosts.forEach((q, i) => {
+      console.log(`${i + 1}. ${q.title} [${q.id}]`);
+      console.log(`   Space: ${q.space.name}`);
+      console.log(`   Period: ${q.startTime} → ${q.endTime}`);
+      console.log(`   Desc: ${q.description}\n`);
+    });
   } catch (err) {
     console.error(err);
   }
