@@ -1,5 +1,5 @@
 // index.js
-import 'dotenv/config';  // load .env
+import 'dotenv/config';
 
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 const ENDPOINT     = 'https://graphigo.prd.galaxy.eco/query';
@@ -8,69 +8,64 @@ if (!ACCESS_TOKEN) {
   throw new Error('🚨 Missing ACCESS_TOKEN in .env');
 }
 
-// Query GraphQL untuk trending quests
-const QUERY = `
-  query GetTrendingQuests($first: Int!, $after: String, $orderBy: QuestOrderBy!) {
-    quests(first: $first, after: $after, orderBy: $orderBy) {
-      edges {
-        node {
-          id
-          title
-          description
-          startTime
-          endTime
-          space { id name }
+// 1) Introspection query untuk dapatkan semua query & enums
+const INTROSPECTION_QUERY = `
+  query Introspection {
+    __schema {
+      queryType { name }
+      types {
+        name
+        kind
+        fields {
+          name
         }
+        enumValues { name }
       }
-      pageInfo { hasNextPage endCursor }
     }
   }
 `;
 
-/**
- * Fetch trending quests dengan pagination
- */
-async function fetchTrendingQuests(first = 20, after = null) {
-  const variables = { first, after, orderBy: "TRENDING" };
-
+async function introspectSchema() {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'access-token': ACCESS_TOKEN
     },
-    body: JSON.stringify({ query: QUERY, variables })
+    body: JSON.stringify({ query: INTROSPECTION_QUERY })
   });
-
-  // Baca body text untuk debug jika error
-  const text = await res.text();
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status} – ${text || res.statusText}`);
+    const txt = await res.text();
+    throw new Error(`Introspection HTTP ${res.status} – ${txt}`);
   }
-
-  const { data, errors } = JSON.parse(text);
-  if (errors) {
-    const msgs = errors.map(e => e.message).join('\n');
-    throw new Error(`GraphQL errors:\n${msgs}`);
-  }
-  return data.quests;
+  const { data, errors } = await res.json();
+  if (errors) throw new Error(`Introspection errors:\n${errors.map(e=>e.message).join('\n')}`);
+  return data.__schema.types;
 }
 
 (async () => {
   try {
-    // Page pertama
-    let { edges, pageInfo } = await fetchTrendingQuests(20, null);
-    edges.forEach(({ node }) =>
-      console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`)
-    );
+    console.log('🔍 Performing schema introspection...');
+    const types = await introspectSchema();
 
-    // Pagination
-    while (pageInfo.hasNextPage) {
-      ({ edges, pageInfo } = await fetchTrendingQuests(20, pageInfo.endCursor));
-      edges.forEach(({ node }) =>
-        console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`)
-      );
-    }
+    // Cari type Query
+    const queryType = types.find(t => t.name === 'Query' && t.kind === 'OBJECT');
+    console.log('\nAvailable root queries:');
+    queryType.fields.forEach(f => console.log(`  • ${f.name}`));
+
+    // Cari enum yang mengandung 'TREND' (misal QuestSort, SortOrder, dll)
+    console.log('\nAvailable enums containing "TREND":');
+    types
+      .filter(t => t.kind === 'ENUM' && t.enumValues.some(ev => ev.name.includes('TREND')))
+      .forEach(e => {
+        console.log(`\nEnum ${e.name}:`);
+        e.enumValues.forEach(ev => console.log(`  - ${ev.name}`));
+      });
+
+    console.log('\n\n🔧 Dari sini, pilih field & enum yang sesuai untuk query trending quests.');
+    console.log('— Misalnya mungkin ada field `boosts` dengan argumen `sortBy: BOOST_TRENDING`');
+    console.log('— Atau `questsV2(sort: TRENDING, first: Int)`');
+    console.log('\nSetelah itu, sesuaikan query Anda seperti contoh di dokumentasi.');
   } catch (err) {
     console.error(err);
   }
