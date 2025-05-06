@@ -1,17 +1,14 @@
 // index.js
-import 'dotenv/config';  // load .env ke process.env
+import 'dotenv/config';  // load .env
 
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-const ENDPOINT     = 'https://quest-api.galxe.com/graphql';
+const ENDPOINT     = 'https://graphigo.prd.galaxy.eco/query';
 
 if (!ACCESS_TOKEN) {
   throw new Error('🚨 Missing ACCESS_TOKEN in .env');
 }
 
-/**
- * GraphQL query untuk trending quests.
- * Sesuai dokumentasi: https://docs.galxe.com/quest/graphql-api/overview/endpoint-and-queries
- */
+// Query GraphQL untuk trending quests
 const QUERY = `
   query GetTrendingQuests($first: Int!, $after: String, $orderBy: QuestOrderBy!) {
     quests(first: $first, after: $after, orderBy: $orderBy) {
@@ -22,33 +19,19 @@ const QUERY = `
           description
           startTime
           endTime
-          space {
-            id
-            name
-          }
+          space { id name }
         }
       }
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
+      pageInfo { hasNextPage endCursor }
     }
   }
 `;
 
 /**
- * Fetch trending quests dengan pagination.
- *
- * @param {number} first  — jumlah item per page
- * @param {string|null} after — cursor untuk pagination
- * @returns {Promise<{ edges: Array, pageInfo: Object }>}
+ * Fetch trending quests dengan pagination
  */
 async function fetchTrendingQuests(first = 20, after = null) {
-  const variables = {
-    first,
-    after,
-    orderBy: "TRENDING"   // enum QuestOrderBy: TRENDING
-  };
+  const variables = { first, after, orderBy: "TRENDING" };
 
   const res = await fetch(ENDPOINT, {
     method: 'POST',
@@ -59,38 +42,34 @@ async function fetchTrendingQuests(first = 20, after = null) {
     body: JSON.stringify({ query: QUERY, variables })
   });
 
-  // Kalau gagal HTTP
+  // Baca body text untuk debug jika error
+  const text = await res.text();
   if (!res.ok) {
-    const text = await res.text();
     throw new Error(`HTTP ${res.status} – ${text || res.statusText}`);
   }
 
-  const { data, errors } = await res.json();
+  const { data, errors } = JSON.parse(text);
   if (errors) {
-    // Gabungkan pesan error jika ada
     const msgs = errors.map(e => e.message).join('\n');
     throw new Error(`GraphQL errors:\n${msgs}`);
   }
-
   return data.quests;
 }
 
 (async () => {
   try {
-    // Ambil halaman pertama
+    // Page pertama
     let { edges, pageInfo } = await fetchTrendingQuests(20, null);
+    edges.forEach(({ node }) =>
+      console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`)
+    );
 
-    // Cetak hasil page pertama
-    edges.forEach(({ node }) => {
-      console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`);
-    });
-
-    // Loop pagination
+    // Pagination
     while (pageInfo.hasNextPage) {
       ({ edges, pageInfo } = await fetchTrendingQuests(20, pageInfo.endCursor));
-      edges.forEach(({ node }) => {
-        console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`);
-      });
+      edges.forEach(({ node }) =>
+        console.log(`• ${node.title} [${node.id}] (Space: ${node.space.name})`)
+      );
     }
   } catch (err) {
     console.error(err);
